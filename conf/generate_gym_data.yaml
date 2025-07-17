@@ -1,0 +1,53 @@
+inherit: 
+    - models/standard.yaml
+
+model:
+    n_dims: 4  # cartpole has 4 state dimensions
+    n_positions: 1024
+
+training:
+    task: linear_regression   # Not used, but required by schema
+    data: gaussian            # Not used, but required by schema
+    task_kwargs: {}          # Not used, but required by schema
+    epochs: 1
+    batch_size: 10           # Number of trajectories per batch
+    learning_rate: 0.0001
+    save_every_steps: 100
+    keep_every_steps: 100
+    train_steps: 5           # Number of training batches to generate
+    test_pendulums: 2        # Number of test batches to generate
+    test_pendulums_outofdistr: 0
+    curriculum:
+        dims:
+            start: 4
+            end: 4
+            inc: 1
+            interval: 200000000000
+        points:
+            start: 560       # Number of timesteps per trajectory (matches gym_cartpole_test.py)
+            end: 560
+            inc: 1
+            interval: 2000000000000
+
+wandb:
+    name: "gym_data_generation"
+    entity: "test"
+    project: "test"
+    notes: "Generating cartpole data using gym environment"
+    log_every_steps: 100
+
+# Dataset configuration
+dataset_filesfolder: "./dataset_cartpole_gym"  # Folder to store all pickle files and logging info
+pickle_folder: "picklefolder"                  # Subfolder for training pkl files
+pickle_folder_test: "picklefolder_test"        # Subfolder for test pkl files
+pickle_folder_test_outofdistr: "picklefolder_test_outofdistr"  # Subfolder for OOD test pkl files
+dataset_logger_textfile: "dataset_logger_train.txt"
+dataset_test_logger_textfile: "dataset_logger_test.txt"
+dataset_test_outofdistr_logger_textfile: "dataset_logger_test_ood.txt"
+
+# Additional required parameters
+out_dir: "./output_gym"
+loss: mse
+use_chunk: 1
+test_run: false
+model_logger_textfile: "model_logger.txt" 

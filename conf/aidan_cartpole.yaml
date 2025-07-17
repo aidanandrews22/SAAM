@@ -1,0 +1,53 @@
+out_dir: "./output_gym_full"
+dataset_filesfolder: "./dataset_cartpole_gym_full"
+pickle_folder: "picklefolder"
+pickle_folder_test: "picklefolder_test"
+pickle_folder_test_outofdistr: "picklefolder_test_outofdistr"
+dataset_logger_textfile: "dataset_logger_train.txt"
+dataset_test_logger_textfile: "dataset_logger_test.txt"
+dataset_test_outofdistr_logger_textfile: "dataset_logger_test_ood.txt"
+model_logger_textfile: "model_logger.txt" 
+loss: "mean_squared_error"
+use_chunk: 50
+
+model:
+  family: "gpt2"
+  n_positions: 1024
+  n_dims: 4  # cartpole has 4 state dimensions
+  n_embd: 256
+  n_layer: 16
+  n_head: 16
+
+training:
+  task: linear_regression  # Task type for the training framework
+  data: gaussian
+  task_kwargs: {}
+  epochs: 1000         # Extended epochs for full convergence
+  batch_size: 16       # Smaller batch size for large model and memory efficiency
+  learning_rate: 0.0001 # Conservative learning rate for stability
+  save_every_steps: 250  # Regular checkpointing
+  keep_every_steps: 1000 # Permanent checkpoints
+  train_steps: 10000000  # Extended training steps for full convergence
+  test_pendulums: 1
+  test_pendulums_outofdistr: 1
+  resume_id: null
+  curriculum:
+    dims:
+      start: 2
+      end: 4           # Full state dimension
+      inc: 1
+      interval: 1000000 # Gradual curriculum progression
+    points:
+      start: 300
+      end: 1000
+      inc: 50
+      interval: 2000000 # Gradual trajectory length increase
+
+wandb:
+  name: "full_gym_cartpole_training"
+  entity: "aidansa"
+  project: "cartpole-control-full"
+  notes: "Full dataset generation and training with gym environment and swingup_lqr_controller"
+  log_every_steps: 100
+
+test_run: false
