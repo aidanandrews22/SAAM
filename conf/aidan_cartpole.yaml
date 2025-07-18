@@ -8,12 +8,13 @@ dataset_test_logger_textfile: "dataset_logger_test.txt"
 dataset_test_outofdistr_logger_textfile: "dataset_logger_test_ood.txt"
 model_logger_textfile: "model_logger.txt" 
 loss: "mean_squared_error"
-use_chunk: 50
+use_chunk: 1
 
 model:
   family: "gpt2"
-  n_positions: 1024
+  n_positions: 300  # Match the sequence length from curriculum
   n_dims: 4  # cartpole has 4 state dimensions
+  n_dims_out: 2
   n_embd: 256
   n_layer: 16
   n_head: 16
@@ -22,12 +23,12 @@ training:
   task: linear_regression  # Task type for the training framework
   data: gaussian
   task_kwargs: {}
-  epochs: 1000         # Extended epochs for full convergence
+  epochs: 100         # Extended epochs for full convergence
   batch_size: 16       # Smaller batch size for large model and memory efficiency
   learning_rate: 0.0001 # Conservative learning rate for stability
   save_every_steps: 250  # Regular checkpointing
   keep_every_steps: 1000 # Permanent checkpoints
-  train_steps: 10000000  # Extended training steps for full convergence
+  train_steps: 10  # Extended training steps for full convergence
   test_pendulums: 1
   test_pendulums_outofdistr: 1
   resume_id: null

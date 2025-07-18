@@ -17,6 +17,7 @@ model_schema = {
     "family": merge(tstring, allowed(["gpt2", "lstm"])),
     "n_positions": merge(tinteger, required),  # maximum context length
     "n_dims": merge(tinteger, required),  # latent dimension
+    "n_dims_out": {"type": "integer", "required": True},
     "n_embd": merge(tinteger, required),
     "n_layer": merge(tinteger, required),
     "n_head": merge(tinteger, required),
@@ -82,8 +83,6 @@ schema = {
     "dataset_test_logger_textfile": merge(tstring, {"required": False}),
     "dataset_test_outofdistr_logger_textfile": merge(tstring, {"required": False}),
     "model_logger_textfile": merge(tstring, default("blah.txt")),
-    "loss": merge(tstring, default("mean_squared_error")), 
-    "use_chunk": merge(tinteger, default(1)), 
+    "loss": merge(tstring, default("mean_squared_error")),
+    "use_chunk": merge(tinteger, default(1)),
 }
-
-

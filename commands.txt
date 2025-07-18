@@ -1,0 +1,3 @@
+clean: rm -r ./dataset_cartpole_gym_full & rm -r ./output_gym_full
+datagen: python generate_dataset_cartpole_gym.py --config conf/aidan_cartpole.yaml
+train: python trainSequential_ebonye_cartpole.py --config conf/aidan_cartpole.yaml

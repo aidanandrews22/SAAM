@@ -8,7 +8,7 @@ import warnings
 from sklearn import tree
 import xgboost as xgb
 import ipdb
-from base_models import NeuralNetwork, ParallelNetworks
+from model.base_models import NeuralNetwork, ParallelNetworks
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel
 import torch.distributed as dist
@@ -21,10 +21,11 @@ def build_model(conf):
     if conf.family == "gpt2":
         model = TransformerModel(
             n_dims=conf.n_dims,
+            n_dims_out=conf.n_dims_out,
             n_positions=conf.n_positions,
             n_embd=conf.n_embd,
             n_layer=conf.n_layer,
-            n_head=conf.n_head, 
+            n_head=conf.n_head,
         )
     else:
         raise NotImplementedError
@@ -84,7 +85,9 @@ def get_relevant_baselines(task_name):
 
 
 class TransformerModel(nn.Module):
-    def __init__(self, n_dims, n_positions, n_embd=256, n_layer=12, n_head=8):
+    def __init__(
+        self, n_dims, n_positions, n_embd=256, n_layer=12, n_head=8, n_dims_out=1
+    ):
         super(TransformerModel, self).__init__()
         configuration = GPT2Config(
             n_positions=2 * n_positions,
@@ -100,22 +103,24 @@ class TransformerModel(nn.Module):
 
         self.n_positions = n_positions
         self.n_dims = n_dims
-        
+
         # self.time_embedding = nn.Embedding(300, n_embd) #linear system
-        self.time_embedding = nn.Embedding(560, n_embd) #cartpole
+        self.time_embedding = nn.Embedding(560, n_embd)  # cartpole
         self.state_embedding = nn.Linear(n_dims, n_embd)
-        self.control_embedding = nn.Linear(1, n_embd)
+        self.control_embedding = nn.Linear(n_dims_out, n_embd)
         # self.switch_embedding = nn.Embedding(2, n_embd)  # add embedding for switching controller for cartpole
         # self.control_embedding = nn.Linear(2, n_embd)  # add label for switching controller for cartpole
 
         self.embed_ln = nn.LayerNorm(n_embd, eps=1e-5)
 
         self._backbone = GPT2Model(configuration)
-        
-        self._state_head = nn.Linear(n_embd, 4) #4/18/2025 cartpole
+
+        self._state_head = nn.Linear(n_embd, 4)  # 4/18/2025 cartpole
         # self._state_head = nn.Linear(n_embd, 2) #4/18/2025 pendulum and linear system
         # self._control_head = nn.Linear(n_embd, 1) # no label for switching controller
-        self._control_head = nn.Linear(n_embd, 2)  # add label for switching controller for cartpole
+        self._control_head = nn.Linear(
+            n_embd, 2
+        )  # add label for switching controller for cartpole
 
     # @staticmethod
     # def _combine(xs_b, ys_b):
@@ -132,7 +137,7 @@ class TransformerModel(nn.Module):
     #     zs = torch.stack((xs_b, ys_b_wide), dim=2)
     #     zs = zs.view(bsize, 2 * points, dim)
     #     return zs
-    
+
     # @staticmethod
     # def _combine_ebonye(xs_b, ys_b):
     #     # """Interleaves the x's and the y's into a single sequence of embeddings."""
@@ -145,12 +150,12 @@ class TransformerModel(nn.Module):
     #     bsize, points, state_dim = xs_b.shape
     #     time_dim = 1
 
-    #     ys_b_wide = ys_b.view(bsize, points, 1) 
-        
+    #     ys_b_wide = ys_b.view(bsize, points, 1)
+
     #     # full_time_idx = torch.linspace(0, 1, steps=300, device=xs_b.device).view(1, 300, 1) # linear system
     #     full_time_idx = torch.linspace(0, 1, steps=560, device=xs_b.device).view(1, 560, 1)  # cartpole
     #     time_idx = full_time_idx[:, :points, :].repeat(bsize, 1, 1)  # Get time index for the current batch
-        
+
     #     zeros_control_pad = torch.zeros(bsize, points, state_dim -1, device=ys_b.device)  # Padding for control dimension
     #     ys_b_padded = torch.cat((ys_b_wide, zeros_control_pad), dim=-1)
 
@@ -159,9 +164,9 @@ class TransformerModel(nn.Module):
 
     #     stacked = torch.stack((xs_b, ys_b_padded, time_idx_padded), dim=2)
     #     zs = stacked.view(bsize, 3*points, state_dim)
-        
+
     #     # import pdb; pdb.set_trace()
-        
+
     #     # xs_b_aug = torch.cat([xs_b, time_idx], dim=-1)  # Augment xs_b with time index
     #     # ys_b_wide = torch.cat(
     #     #     (
@@ -179,22 +184,24 @@ class TransformerModel(nn.Module):
         Inf is for inference mode.
         """
         if inf == "yes":
-            xs_b = xs.unsqueeze(0)  
+            xs_b = xs.unsqueeze(0)
             ys_b = ys.unsqueeze(0)
 
             if xs_b.shape[1] == ys_b.shape[1] + 1:
                 # padding = torch.zeros((ys_b.shape[0], 1), device=ys_b.device) # 5/25/2025 padding for ys no label
-                padding = torch.zeros((ys_b.shape[0], 1, 2), device=xs.device)  # 5/25/2025 padding for ys with label
+                padding = torch.zeros(
+                    (ys_b.shape[0], 1, 2), device=xs.device
+                )  # 5/25/2025 padding for ys with label
                 ys_b = torch.cat((ys_b, padding), dim=1)
 
             # import pdb; pdb.set_trace()
             # zs = self._combine(xs_b, ys_b)
-            # zs = self._combine_ebonye(xs_b, ys_b)  
-            
+            # zs = self._combine_ebonye(xs_b, ys_b)
+
             # embeds = self._read_in(zs)
 
             ### old code
-           
+
             # output = self._backbone(inputs_embeds=embeds).last_hidden_state
             # # prediction = self._read_out(output)
             # # print(f"output shape: {output.shape}")
@@ -203,7 +210,7 @@ class TransformerModel(nn.Module):
             # # state_prediction = self._state_head(output[:, 1::2, :]) #4/11/2025 seems to be predicting state from control (wrong suggestion from gpt)
             # # control_prediction = self._control_head(output[:, ::2, :]) #4/11/2025 seems to be predicting control from state (wrong suggestion from gpt)
 
-            # state_prediction = self._state_head(output[:, 1::3, :]) 
+            # state_prediction = self._state_head(output[:, 1::3, :])
             # control_prediction = self._control_head(output[:, ::3, :])
             ### end old code
 
@@ -218,18 +225,20 @@ class TransformerModel(nn.Module):
             # control_prediction = self._control_head(output)
             # ### end chatgpt suggestion
 
-            
             #### embeddings for switching new code 6/24/2025
             # control_scalar = ys_b[..., 0].unsqueeze(-1)
             # switch_flag = ys_b[..., 1].long()
 
-
-            states_embed = self.state_embedding(xs_b) 
+            states_embed = self.state_embedding(xs_b)
             controls_embed = self.control_embedding(ys_b)
 
             #### embeddings for switching new code 6/24/2025
-            # controls_embed = self.control_embedding(control_scalar)  
-            timesteps = torch.arange(0, xs_b.shape[1], device=xs_b.device).unsqueeze(0).repeat(xs_b.shape[0], 1)
+            # controls_embed = self.control_embedding(control_scalar)
+            timesteps = (
+                torch.arange(0, xs_b.shape[1], device=xs_b.device)
+                .unsqueeze(0)
+                .repeat(xs_b.shape[0], 1)
+            )
             time_embed = self.time_embedding(timesteps)
 
             #### embeddings for switching new code 6/24/2025
@@ -241,53 +250,60 @@ class TransformerModel(nn.Module):
 
             stacked_inputs = torch.stack((states_embed, controls_embed), dim=2)
             zs = stacked_inputs.view(xs_b.shape[0], 2 * xs_b.shape[1], -1)
-            zs = self.embed_ln(zs)  # Apply layer normalization to the combined embeddings
+            zs = self.embed_ln(
+                zs
+            )  # Apply layer normalization to the combined embeddings
 
             output = self._backbone(inputs_embeds=zs).last_hidden_state
 
-            control_prediction = self._control_head(output[:, ::2, :])  # Control predictions
+            control_prediction = self._control_head(
+                output[:, ::2, :]
+            )  # Control predictions
             state_prediction = self._state_head(output[:, 1::2, :])  # State predictions
             return control_prediction, state_prediction
-        
+
         # print(f"xs shape: {xs.shape}")
         # print(f"ys shape: {ys.shape}")
 
-        
-        
         if xs.shape[1] == ys.shape[1] + 1:
             # padding = torch.zeros((ys.shape[0], 1), device=ys.device)
-            padding = torch.zeros((ys.shape[0], 1, 2), device=xs.device)  # 5/25/2025 padding for xs
+            padding = torch.zeros(
+                (ys.shape[0], 1, 2), device=xs.device
+            )  # 5/25/2025 padding for xs
             ys = torch.cat((ys, padding), dim=1)
 
         # import pdb; pdb.set_trace()
 
-        states_embed = self.state_embedding(xs) # 5/25/2025 separate embeddings
+        states_embed = self.state_embedding(xs)  # 5/25/2025 separate embeddings
         # controls_embed = self.control_embedding(ys.unsqueeze(-1)) # 5/25/2025 separate embeddings, no labels for control switching
-        controls_embed = self.control_embedding(ys)  # 5/25/2025 separate embeddings, ys is already in the right shape
-        
-        
-        timesteps = torch.arange(0, xs.shape[1], device=xs.device).unsqueeze(0).repeat(xs.shape[0], 1)
-        time_embed = self.time_embedding(timesteps) 
+        controls_embed = self.control_embedding(
+            ys
+        )  # 5/25/2025 separate embeddings, ys is already in the right shape
 
-       
+        timesteps = (
+            torch.arange(0, xs.shape[1], device=xs.device)
+            .unsqueeze(0)
+            .repeat(xs.shape[0], 1)
+        )
+        time_embed = self.time_embedding(timesteps)
 
         states_embed = states_embed + time_embed
         # states_embed = states_embed + time_embed + switch_embed
         controls_embed = controls_embed + time_embed
 
-        stacked_inputs = torch.stack((states_embed, controls_embed), dim=2) 
-        zs = stacked_inputs.view(xs.shape[0], 2 * xs.shape[1], -1) 
+        stacked_inputs = torch.stack((states_embed, controls_embed), dim=2)
+        zs = stacked_inputs.view(xs.shape[0], 2 * xs.shape[1], -1)
         zs = self.embed_ln(zs)  # Apply layer normalization to the combined embeddings
 
         output = self._backbone(inputs_embeds=zs).last_hidden_state
 
-        control_prediction = self._control_head(output[:, ::2, :])  # Control predictions
+        control_prediction = self._control_head(
+            output[:, ::2, :]
+        )  # Control predictions
         state_prediction = self._state_head(output[:, 1::2, :])  # State predictions
 
-        
-
         # # zs = self._combine(xs, ys)
-        # zs = self._combine_ebonye(xs, ys) 
+        # zs = self._combine_ebonye(xs, ys)
 
         # # zs = self._combine_ebonye(states_embed, controls_embed) # 5/25/2025 separate embeddings
 
@@ -297,7 +313,6 @@ class TransformerModel(nn.Module):
         # embeds = self._read_in(zs)
         # output = self._backbone(inputs_embeds=embeds).last_hidden_state
 
-        
         # state_prediction = self._state_head(output[:, 1::3, :]) #4/11/2025 seems to be predicting state from control (wrong suggestion from gpt)
         # control_prediction = self._control_head(output[:, ::3, :]) #4/11/2025 seems to be predicting control from state (wrong suggestion from gpt)
 
@@ -308,11 +323,6 @@ class TransformerModel(nn.Module):
 
         # import pdb; pdb.set_trace()
 
-      
-
-    
-
-        
         if ys is not None:
             # return prediction[:, ::2, 0]  ##### 4/10/2025 wanting to do loss on states and control
             # return prediction[:, ::2, 0], prediction[:, 1::2, 0]  ##### 4/10/2025 wanting to do loss on states and control
@@ -320,13 +330,11 @@ class TransformerModel(nn.Module):
             # return control_prediction[:,::2], state_prediction[:, 1::2]  ##### 4/10/2025 wanting to do loss on states and control
 
         # if prediction.dim() == 3:
-        #     return prediction[:, :, 0]  
+        #     return prediction[:, :, 0]
         # elif prediction.dim() == 2:
-        #     return prediction[:, 0]  
+        #     return prediction[:, 0]
         else:
             raise ValueError("Unexpected number of dimensions in prediction tensor.")
-
-
 
 
 class NNModel:
@@ -561,7 +569,6 @@ class GDModel:
 
                 # Training loop
                 for j in range(self.num_steps):
-
                     # Prepare batch
                     mask = torch.zeros(i).bool()
                     perm = torch.randperm(i)
