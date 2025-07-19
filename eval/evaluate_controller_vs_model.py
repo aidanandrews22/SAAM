@@ -6,6 +6,8 @@ import torch
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
+import imageio
+from datetime import datetime
 from tqdm import tqdm
 
 from controller.gym_continuous_cartpole import ContinuousCartPoleEnv
@@ -14,21 +16,28 @@ from model.models import build_model
 
 
 def generate_test_trajectory(
-    cartmass, polemass, polelength, n_points, initial_state, dt=0.025
+    cartmass, polemass, polelength, n_points, initial_state, dt=0.025, record_video=False
 ):
     """Generate a test trajectory using the controller."""
+    render_mode = "rgb_array" if record_video else None
     env = ContinuousCartPoleEnv(
         masscart=cartmass,
         masspole=polemass,
         length=polelength,
-        render_mode=None,
+        render_mode=render_mode,
     )
     env.tau = dt
+    
+    # Set wider screen for better visibility
+    if record_video:
+        env.screen_width = 1200
+        env.screen_height = 600
 
     obs, _ = env.reset(options={"init_state": initial_state.tolist()})
 
     states = [obs]
     controls = []
+    frames = []
     switched = False
 
     for _ in range(n_points - 1):
@@ -37,6 +46,10 @@ def generate_test_trajectory(
         )
 
         obs, _, done, truncated, _, applied_action = env.step(action)
+        
+        if record_video:
+            frame = env.render()
+            frames.append(frame)
 
         states.append(obs)
         controls.append(applied_action[0])
@@ -53,7 +66,63 @@ def generate_test_trajectory(
     states = np.array(states)
     controls = np.array(controls)
 
-    return states, controls
+    return states, controls, frames if record_video else None
+
+
+def generate_model_trajectory(
+    model, cartmass, polemass, polelength, n_points, initial_state, device="cuda:0", dt=0.025
+):
+    """Generate a trajectory using the model predictions."""
+    env = ContinuousCartPoleEnv(
+        masscart=cartmass,
+        masspole=polemass,
+        length=polelength,
+        render_mode="rgb_array",
+    )
+    env.tau = dt
+    
+    # Set wider screen for better visibility
+    env.screen_width = 1200
+    env.screen_height = 600
+
+    obs, _ = env.reset(options={"init_state": initial_state.tolist()})
+
+    states = [obs]
+    controls = []
+    frames = []
+    
+    for _ in range(n_points - 1):
+        # Get model prediction for next control action
+        state_tensor = torch.tensor(obs, dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
+        
+        # Create dummy control input for the model
+        dummy_control = np.array([[0.0, 0.0]])  # [control_value, control_mode]
+        control_tensor = torch.tensor(dummy_control, dtype=torch.float32, device=device).unsqueeze(0)
+        
+        with torch.no_grad():
+            pred_controls, _ = model(state_tensor, control_tensor)
+            action = pred_controls[0, 0, 0].cpu().numpy()
+
+        obs, _, done, truncated, _, applied_action = env.step(action)
+        frame = env.render()
+        frames.append(frame)
+
+        states.append(obs)
+        controls.append(applied_action[0])
+
+        if done or truncated:
+            while len(states) < n_points:
+                states.append(obs)
+            while len(controls) < n_points - 1:
+                controls.append(applied_action[0])
+            break
+
+    env.close()
+
+    states = np.array(states)
+    controls = np.array(controls)
+
+    return states, controls, frames
 
 
 def evaluate_model_predictions(model, states, controls, device="cuda:0"):
@@ -151,9 +220,16 @@ def run_evaluation(model_path, num_runs, device="cuda:0"):
     checkpoint = torch.load(model_path, map_location=device)
     model.load_state_dict(checkpoint)
 
-    # Create output directory for plots
-    save_dir = "eval_results"
+    # Create timestamped output directory
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    save_dir = f"eval_results/{timestamp}"
     os.makedirs(save_dir, exist_ok=True)
+    
+    # Create subdirectories
+    videos_dir = os.path.join(save_dir, "videos")
+    plots_dir = os.path.join(save_dir, "plots")
+    os.makedirs(videos_dir, exist_ok=True)
+    os.makedirs(plots_dir, exist_ok=True)
 
     total_control_mse = 0.0
     total_state_mse = 0.0
@@ -164,7 +240,7 @@ def run_evaluation(model_path, num_runs, device="cuda:0"):
     all_controller_stats = []
     all_model_stats = []
     
-    # Save first few runs for plotting
+    # Save first few runs for plotting and videos
     plot_runs = min(5, num_runs)
 
     for run in tqdm(range(num_runs), desc="Evaluating"):
@@ -185,15 +261,30 @@ def run_evaluation(model_path, num_runs, device="cuda:0"):
 
         n_points = 300  # Match training data
 
-        # Generate controller trajectory
-        states, controls = generate_test_trajectory(
-            cartmass, polemass, polelength, n_points, initial_state
+        # Generate controller trajectory (with video for first few runs)
+        record_video = run < plot_runs
+        states, controls, controller_frames = generate_test_trajectory(
+            cartmass, polemass, polelength, n_points, initial_state, record_video=record_video
         )
 
         # Get model predictions
         pred_controls, pred_states = evaluate_model_predictions(
             model, states, controls, device
         )
+
+        # Generate model trajectory with video for first few runs
+        if record_video:
+            model_states, model_controls, model_frames = generate_model_trajectory(
+                model, cartmass, polemass, polelength, n_points, initial_state, device
+            )
+            
+            # Save videos
+            if controller_frames:
+                controller_video_path = os.path.join(videos_dir, f'controller_run_{run}.mp4')
+                imageio.mimsave(controller_video_path, controller_frames, fps=40)
+            
+            model_video_path = os.path.join(videos_dir, f'model_run_{run}.mp4')
+            imageio.mimsave(model_video_path, model_frames, fps=40)
 
         # Check stabilization
         controller_stable = check_stabilization(states)
@@ -214,7 +305,7 @@ def run_evaluation(model_path, num_runs, device="cuda:0"):
 
         # Plot first few runs
         if run < plot_runs:
-            plot_control_comparison(controls, model_controls_trimmed, run, save_dir)
+            plot_control_comparison(controls, model_controls_trimmed, run, plots_dir)
 
         # Compute MSE for controls (compare predicted vs actual)
         control_mse = compute_mse(
@@ -257,8 +348,10 @@ def run_evaluation(model_path, num_runs, device="cuda:0"):
     print(f"  Model - Max: {np.mean(model_max_vals):.3f} ± {np.std(model_max_vals):.3f}")
     print(f"  Model - Min: {np.mean(model_min_vals):.3f} ± {np.std(model_min_vals):.3f}")
     
-    print(f"\nPlots saved to: {save_dir}/")
-    print(f"Generated {plot_runs} control comparison plots")
+    print(f"\nOutputs saved to: {save_dir}/")
+    print(f"Generated {plot_runs} control comparison plots and videos")
+    print(f"  - Videos: {videos_dir}/")
+    print(f"  - Plots: {plots_dir}/")
 
     return avg_control_mse, avg_state_mse
 
