@@ -22,6 +22,7 @@ from controller.gym_cartpole_swingup_lqr import swingup_lqr_controller
 from generate_dataset_cartpole_gym import (
     run_single_trajectory,
     get_valid_masses_and_lengths_uniform,
+    generate_random_initial_conditions,
 )
 from model.models import build_model
 from quinine import QuinineArgumentParser
@@ -41,21 +42,7 @@ def generate_ground_truth(
     n_points: int,
     dt: float = 0.025,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Wrapper around :pyfunc:`run_single_trajectory` returning consistent shapes.
-
-    Returns
-    -------
-    states : (T, 4) ndarray
-        System states over time.
-    controls : (T-1,) ndarray
-        Control force applied by the hybrid controller.
-    modes : (T-1,) ndarray
-        0 = swing‑up, 1 = LQR.
-    """
-    init_state = np.random.uniform(
-        low=[0.0, np.pi - np.pi / 2, 0.0, -1.0],
-        high=[0.0, np.pi + np.pi / 2, 0.0, 1.0],
-    )
+    init_state = generate_random_initial_conditions(size=1)[0]
 
     states, controls, modes = run_single_trajectory(
         cartmass, polemass, polelength, init_state, n_points, dt
