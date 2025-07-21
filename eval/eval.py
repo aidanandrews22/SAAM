@@ -8,13 +8,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Tuple, List, Dict
 
-import imageio.v2 as imageio  # type: ignore – needed for video export
-import matplotlib.pyplot as plt  # plots are written to disk, never shown
+import imageio.v2 as imageio
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from tqdm import tqdm
 
-
+# move to root directory: SAAM/eval/__file__ -> SAAM/
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(ROOT))
 
@@ -78,8 +78,7 @@ def predict_sequence(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Feed ground‑truth state/control history and obtain model predictions.
 
-    The model receives the *full* trajectory tensors at once; adjust here if
-    your model expects recurrent rollout.
+    The model receives the *full* trajectory tensors at once
     """
     control_modes = np.zeros_like(gt_controls)
     ctrl_in = np.stack([gt_controls, control_modes], axis=-1)  # (T-1, 2)
@@ -99,11 +98,6 @@ def predict_sequence(
         pred_ctrl.squeeze(0).cpu().numpy(),  # (T-1, 1)
         pred_states.squeeze(0).cpu().numpy(),  # (T-1, 4)
     )
-
-
-# ---------------------------------------------------------------------------
-# Visualisation helpers
-# ---------------------------------------------------------------------------
 
 
 def plot_scatter(
@@ -130,6 +124,53 @@ def plot_hist(data: np.ndarray, xlabel: str, title: str, path: Path):
     plt.tight_layout()
     plt.savefig(path, dpi=150)
     plt.close()
+
+
+def render_trajectory(
+    states: np.ndarray,
+    controls: np.ndarray,
+    cartmass: float,
+    polemass: float,
+    polelength: float,
+    dt: float,
+    video_path: Path,
+) -> None:
+    """Render a trajectory from states and controls to create a video."""
+    from controller.gym_continuous_cartpole import ContinuousCartPoleEnv
+    
+    env = ContinuousCartPoleEnv(
+        masscart=cartmass,
+        masspole=polemass,
+        length=polelength,
+        render_mode="rgb_array",
+    )
+    env.tau = dt
+    env.screen_width, env.screen_height = 1200, 600
+    
+    # Set initial state
+    obs, _ = env.reset(options={"init_state": states[0].tolist()})
+    frames: List[np.ndarray] = []
+    
+    # Render initial frame
+    frames.append(env.render())
+    
+    # Step through the trajectory using the provided controls
+    for i, action in enumerate(controls):
+        obs, *_ = env.step(action)
+        frames.append(env.render())
+        
+        # Optional: verify we're following the expected trajectory
+        # (small deviations are expected due to numerical differences)
+        if i + 1 < len(states):
+            expected_state = states[i + 1]
+            actual_state = obs
+            # Small tolerance for numerical differences in integration
+            if np.max(np.abs(expected_state - actual_state)) > 0.1:
+                print(f"Warning: trajectory deviation at step {i}: "
+                      f"expected {expected_state}, got {actual_state}")
+    
+    env.close()
+    imageio.mimsave(video_path, frames, fps=int(1 / dt))
 
 
 def evaluate(
@@ -179,29 +220,25 @@ def evaluate(
         pole_lengths.append(polelength)
         ctrl_ranges.append(gt_controls.max() - gt_controls.min())
 
+        # Generate videos for the first few runs
         if run < save_video_first_n:
-            from controller.gym_continuous_cartpole import ContinuousCartPoleEnv
-
-            env = ContinuousCartPoleEnv(
-                masscart=cartmass,
-                masspole=polemass,
-                length=polelength,
-                render_mode="rgb_array",
+            # Ground truth video
+            gt_video_path = videos_dir / f"run_{run:03d}_ground_truth.mp4"
+            render_trajectory(
+                gt_states, gt_controls, cartmass, polemass, polelength, dt, gt_video_path
             )
-            env.tau = dt
-            env.screen_width, env.screen_height = 1200, 600
-            obs, _ = env.reset(options={"init_state": gt_states[0].tolist()})
-            frames: List[np.ndarray] = []
-            switched = bool(modes[0])  # initial mode flag, negligible
-            for u in gt_controls:
-                action, switched = swingup_lqr_controller(
-                    obs, switched, cartmass, polemass, polelength
-                )
-                obs, *_ = env.step(action)
-                frames.append(env.render())
-            env.close()
-            video_path = videos_dir / f"run_{run:03d}.mp4"
-            imageio.mimsave(video_path, frames, fps=int(1 / dt))
+            
+            # Model prediction video
+            # For model predictions, we need to construct the full state trajectory
+            # by integrating the predicted states (which are state transitions)
+            pred_full_states = np.zeros_like(gt_states)
+            pred_full_states[0] = gt_states[0]  # same initial condition
+            pred_full_states[1:] = pred_states  # predicted next states
+            
+            pred_video_path = videos_dir / f"run_{run:03d}_model_prediction.mp4"
+            render_trajectory(
+                pred_full_states, pred_controls, cartmass, polemass, polelength, dt, pred_video_path
+            )
 
     ctrl_mse_arr = np.array(ctrl_mse)
     state_mse_arr = np.array(state_mse)
