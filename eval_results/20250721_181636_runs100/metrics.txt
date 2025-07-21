@@ -1,0 +1,4 @@
+avg_control_mse: 2.095814
+std_control_mse: 1.049046
+avg_state_mse: 0.030011
+std_state_mse: 0.039254

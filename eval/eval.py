@@ -43,6 +43,7 @@ def generate_ground_truth(
     dt: float = 0.025,
 ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     init_state = generate_random_initial_conditions(size=1)[0]
+    print(f"Initial State(generate_ground_truth): {init_state}")
 
     states, controls, modes = run_single_trajectory(
         cartmass, polemass, polelength, init_state, n_points, dt
@@ -137,7 +138,9 @@ def render_trajectory(
 ) -> None:
     """Render a trajectory from states and controls to create a video."""
     from controller.gym_continuous_cartpole import ContinuousCartPoleEnv
-    
+
+    print(f"Initial state(render_trajectory): {states[0]}")
+
     env = ContinuousCartPoleEnv(
         masscart=cartmass,
         masspole=polemass,
@@ -146,19 +149,19 @@ def render_trajectory(
     )
     env.tau = dt
     env.screen_width, env.screen_height = 1200, 600
-    
+
     # Set initial state
     obs, _ = env.reset(options={"init_state": states[0].tolist()})
     frames: List[np.ndarray] = []
-    
+
     # Render initial frame
     frames.append(env.render())
-    
+
     # Step through the trajectory using the provided controls
     for i, action in enumerate(controls):
         obs, *_ = env.step(action)
         frames.append(env.render())
-        
+
         # Optional: verify we're following the expected trajectory
         # (small deviations are expected due to numerical differences)
         if i + 1 < len(states):
@@ -166,9 +169,11 @@ def render_trajectory(
             actual_state = obs
             # Small tolerance for numerical differences in integration
             if np.max(np.abs(expected_state - actual_state)) > 0.1:
-                print(f"Warning: trajectory deviation at step {i}: "
-                      f"expected {expected_state}, got {actual_state}")
-    
+                print(
+                    f"Warning: trajectory deviation at step {i}: "
+                    f"expected {expected_state}, got {actual_state}"
+                )
+
     env.close()
     imageio.mimsave(video_path, frames, fps=int(1 / dt))
 
@@ -225,19 +230,31 @@ def evaluate(
             # Ground truth video
             gt_video_path = videos_dir / f"run_{run:03d}_ground_truth.mp4"
             render_trajectory(
-                gt_states, gt_controls, cartmass, polemass, polelength, dt, gt_video_path
+                gt_states,
+                gt_controls,
+                cartmass,
+                polemass,
+                polelength,
+                dt,
+                gt_video_path,
             )
-            
+
             # Model prediction video
             # For model predictions, we need to construct the full state trajectory
             # by integrating the predicted states (which are state transitions)
             pred_full_states = np.zeros_like(gt_states)
             pred_full_states[0] = gt_states[0]  # same initial condition
             pred_full_states[1:] = pred_states  # predicted next states
-            
+
             pred_video_path = videos_dir / f"run_{run:03d}_model_prediction.mp4"
             render_trajectory(
-                pred_full_states, pred_controls, cartmass, polemass, polelength, dt, pred_video_path
+                pred_full_states,
+                pred_controls,
+                cartmass,
+                polemass,
+                polelength,
+                dt,
+                pred_video_path,
             )
 
     ctrl_mse_arr = np.array(ctrl_mse)

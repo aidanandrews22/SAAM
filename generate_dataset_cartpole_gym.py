@@ -79,6 +79,7 @@ def run_single_trajectory(
         controls: np.ndarray of shape (n_points,) - control values
         modes: np.ndarray of shape (n_points,) - control modes (0=swing-up, 1=LQR)
     """
+    print(f"Initial state: {initial_state}")
     env = ContinuousCartPoleEnv(
         masscart=cartmass,
         masspole=polemass,
