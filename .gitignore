@@ -10,3 +10,6 @@
 output_gym_full/
 **/dataset_cartpole_gym_full/
 dataset_cartpole_gym_full/
+22Jul25_1424_dataset_cartpole_gym_full/
+*.pkl
+swingup_output_gym_full/
